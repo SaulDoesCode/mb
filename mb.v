@@ -28,13 +28,143 @@ import crypto.random
 import encoding.base64
 
 struct Rhyzome {
-    conn sqlite.Connection
+	conn sqlite.Connection
 }
 
 struct Relation {
-    name string
-    from_id string
-    to_id string
+	name string
+	from_id string
+	to_id string
+}
+
+fn (rhyzome Rhyzome) open(db_path string) ? {
+	mut conn := sqlite.connect(db_path) or {
+		return err
+	}
+
+	conn.exec('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, value TEXT)') or {
+		return err
+	}
+
+	conn.exec('CREATE TABLE IF NOT EXISTS relations (name TEXT, from_id TEXT, to_id TEXT)') or {
+		return err
+	}
+
+	rhyzome.conn = conn
+	return
+}
+
+fn (rhyzome Rhyzome) close() {
+	rhyzome.conn.close()
+}
+
+fn (rhyzome Rhyzome) set(id string, value string) ? {
+	stmt := rhyzome.conn.prepare('INSERT OR REPLACE INTO nodes (id, value) VALUES (?, ?)') or {
+		return err
+	}
+
+	stmt.bind(1, id) or { return err }
+	stmt.bind(2, value) or { return err }
+	stmt.step() or { return err }
+	stmt.finalize()
+
+	return
+}
+
+fn (rhyzome Rhyzome) get(id string) ?string {
+	stmt := rhyzome.conn.prepare('SELECT value FROM nodes WHERE id = ?') or {
+		return err
+	}
+
+	stmt.bind(1, id) or { return err }
+	if stmt.step() ? {
+		value := stmt.get_str(0)
+		stmt.finalize()
+		return value
+	}
+
+	stmt.finalize()
+	return null
+}
+
+fn (rhyzome Rhyzome) delete(id string) ? {
+	stmt := rhyzome.conn.prepare('DELETE FROM nodes WHERE id = ?') or {
+		return err
+	}
+
+	stmt.bind(1, id) or { return err }
+	stmt.step() or { return err }
+	stmt.finalize()
+
+	return
+}
+
+fn (rhyzome Rhyzome) relate(from_id string, relation_name string, to_id string) ? {
+	stmt := rhyzome.conn.prepare('INSERT INTO relations (name, from_id, to_id) VALUES (?, ?, ?)') or {
+		return err
+	}
+
+	stmt.bind(1, relation_name) or { return err }
+	stmt.bind(2, from_id) or { return err }
+	stmt.bind(3, to_id) or { return err }
+	stmt.step() or { return err }
+	stmt.finalize()
+
+	return
+}
+
+fn (rhyzome Rhyzome) delete_relation(relation_name string) ? {
+	stmt := rhyzome.conn.prepare('DELETE FROM relations WHERE name = ?') or {
+		return err
+	}
+
+	stmt.bind(1, relation_name) or { return err }
+	stmt.step() or { return err }
+	stmt.finalize()
+
+	return
+}
+
+fn (rhyzome Rhyzome) query_relation(from_id string) ?[]Relation {
+	stmt := rhyzome.conn.prepare('SELECT name, to_id FROM relations WHERE from_id = ?') or {
+		return err
+	}
+
+	stmt.bind(1, from_id) or { return err }
+
+	mut relations := [] 
+
+	for stmt.next() {
+		relation_name := stmt.get_str(0)
+		to_id := stmt.get_str(1)
+
+		relation := Relation{
+			name: relation_name,
+			from_id: from_id,
+			to_id: to_id,
+		}
+
+		relations << relation
+	}
+
+	stmt.finalize()
+	return relations
+}
+
+fn (rhyzome Rhyzome) iter_values() ?[]string {
+	stmt := rhyzome.conn.prepare('SELECT value FROM nodes') or {
+		return err
+	}
+
+	mut values := []
+
+	for stmt.next() {
+		value := stmt.get_str(0)
+		values << value
+	}
+
+	stmt.finalize()
+	return values
 }
 
 struct Microblog {
@@ -61,7 +191,9 @@ fn main() {
         admin_password: "your_admin_password_here",
     }
     api.rhyzome.open(":memory:") or { panic(err) }
-    defer api.rhyzome.close()
+    defer {
+	 api.rhyzome.close()
+	}
 
     // Initialize HTTP server
     server := http.server{
@@ -73,128 +205,14 @@ fn main() {
     server.handle('/microblogs/:id', api.handle_microblog)
     server.handle('/microblogs/:id/relations', api.handle_relations)
     server.handle('/microblogs/:id/relations/:relation_name', api.handle_relation)
+	server.handle('/microblogs/all', api.handle_all_microblogs)
     server.handle('/tokens', api.handle_tokens)
 
     // Start the server
     server.start()
 }
 
-impl Rhyzome {
-    fn open(db_path string) ?{
-        mut conn := sqlite.connect(db_path) or {
-            return err
-        }
-
-        conn.exec('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, value TEXT)') or {
-            return err
-        }
-
-        conn.exec('CREATE TABLE IF NOT EXISTS relations (name TEXT, from_id TEXT, to_id TEXT)') or {
-            return err
-        }
-
-        return Rhyzome{conn: conn}
-    }
-
-    fn close() {
-        this.conn.close()
-    }
-
-    fn set(id string, value string) ? {
-        stmt := this.conn.prepare('INSERT OR REPLACE INTO nodes (id, value) VALUES (?, ?)') or {
-            return err
-        }
-
-        stmt.bind(1, id) or { return err }
-        stmt.bind(2, value) or { return err }
-        stmt.step() or { return err }
-        stmt.finalize()
-
-        Ok()
-    }
-
-    fn get(id string) ?string {
-        stmt := this.conn.prepare('SELECT value FROM nodes WHERE id = ?') or {
-            return err
-        }
-
-        stmt.bind(1, id) or { return err }
-        if stmt.step() ? {
-            value := stmt.get_str(0)
-            stmt.finalize()
-            return value
-        }
-
-        stmt.finalize()
-        return null
-    }
-
-    fn delete(id string) ? {
-        stmt := this.conn.prepare('DELETE FROM nodes WHERE id = ?') or {
-            return err
-        }
-
-        stmt.bind(1, id) or { return err }
-        stmt.step() or { return err }
-        stmt.finalize()
-
-        Ok()
-    }
-
-    fn relate(from_id string, relation_name string, to_id string) ? {
-        stmt := this.conn.prepare('INSERT INTO relations (name, from_id, to_id) VALUES (?, ?, ?)') or {
-            return err
-        }
-
-        stmt.bind(1, relation_name) or { return err }
-        stmt.bind(2, from_id) or { return err }
-        stmt.bind(3, to_id) or { return err }
-        stmt.step() or { return err }
-        stmt.finalize()
-
-        Ok()
-    }
-
-    fn delete_relation(relation_name string) ? {
-        stmt := this.conn.prepare('DELETE FROM relations WHERE name = ?') or {
-            return err
-        }
-
-        stmt.bind(1, relation_name) or { return err }
-        stmt.step() or { return err }
-        stmt.finalize()
-
-        Ok()
-    }
-
-    fn query_relation(from_id string) ?[]Relation {
-        stmt := this.conn.prepare('SELECT name, to_id FROM relations WHERE from_id = ?') or {
-            return err
-        }
-
-        stmt.bind(1, from_id) or { return err }
-
-        var relations []Relation
-
-        for stmt.next() {
-            relation_name := stmt.get_str(0)
-            to_id := stmt.get_str(1)
-
-            relation := Relation{
-                name: relation_name,
-                from_id: from_id,
-                to_id: to_id,
-            }
-
-            relations << relation
-        }
-
-        stmt.finalize()
-        return relations
-    }
-}
-
-fn (mut api &MicroblogAPI) handle_microblogs(rw http.ResponseWriter, req http.Request) {
+fn (mut api MicroblogAPI) handle_microblogs(rw http.ResponseWriter, req http.Request) {
     if req.method == .GET {
         microblogs := api.rhyzome.query_relation("microblog")
         json_response(rw, microblogs)
@@ -209,15 +227,27 @@ fn (mut api &MicroblogAPI) handle_microblogs(rw http.ResponseWriter, req http.Re
         id := uuid()
         api.rhyzome.set(id, microblog) or { panic(err) }
         api.rhyzome.relate(id, "microblog", "")
-        json_response(rw, map{"id": id})
+        json_response(rw, {'id': id})
     }
 }
 
-fn (mut api &MicroblogAPI) handle_microblog(rw http.ResponseWriter, req http.Request) {
-    tweet_id := req.vars['id']
+fn (mut api MicroblogAPI) handle_all_microblogs(rw http.ResponseWriter, req http.Request) {
+	if req.method == .GET {
+		microblogs, err := api.rhyzome.iter_values()
+		if err != null {
+			http.response_internal_server_error(rw)
+			return
+		}
+
+		json_response(rw, microblogs)
+	}
+}
+
+fn (mut api MicroblogAPI) handle_microblog(rw http.ResponseWriter, req http.Request) {
+    blog_id := req.vars['id']
     if req.method == .GET {
-        microblog := api.rhyzome.get(tweet_id)
-        json_response(rw, map{"id": tweet_id, "text": microblog})
+        microblog := api.rhyzome.get(blog_id)
+        json_response(rw, {'id': blog_id, 'text': microblog})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
         if !api.validate_token(token) {
@@ -225,21 +255,21 @@ fn (mut api &MicroblogAPI) handle_microblog(rw http.ResponseWriter, req http.Req
             return
         }
 
-        api.rhyzome.delete(tweet_id) or { panic(err) }
-        json_response(rw, map{"message": "Microblog deleted"})
+        api.rhyzome.delete(blog_id) or { panic(err) }
+        json_response(rw, {'message': "Microblog deleted"})
     }
 }
 
-fn (mut api &MicroblogAPI) handle_relations(rw http.ResponseWriter, req http.Request) {
-    tweet_id := req.vars['id']
+fn (mut api MicroblogAPI) handle_relations(rw http.ResponseWriter, req http.Request) {
+    blog_id := req.vars['id']
     if req.method == .GET {
-        relations := api.rhyzome.query_relation(tweet_id)
+        relations := api.rhyzome.query_relation(blog_id)
         json_response(rw, relations)
     }
 }
 
-fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Request) {
-    tweet_id := req.vars['id']
+fn (mut api MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Request) {
+    blog_id := req.vars['id']
     relation_name := req.vars['relation_name']
 
     if req.method == .POST {
@@ -250,8 +280,8 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
         }
 
         related_id := req.body.to_json().get_str('related_id')
-        api.rhyzome.relate(tweet_id, relation_name, related_id)
-        json_response(rw, map{"message": "Related microblog added"})
+        api.rhyzome.relate(blog_id, relation_name, related_id)
+        json_response(rw, {'message': "Related microblog added"})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
         if !api.validate_token(token) {
@@ -260,24 +290,26 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
         }
 
         api.rhyzome.delete_relation(relation_name)
-        json_response(rw, map{"message": "Related microblog deleted"})
+        json_response(rw, {'message': "Related microblog deleted"})
     }
 }
 
-fn (mut api &MicroblogAPI) handle_tokens(rw http.ResponseWriter, req http.Request) {
+fn (mut api MicroblogAPI) handle_tokens(rw http.ResponseWriter, req http.Request) {
     if req.method == .POST {
         password := req.body.to_json().get_str('password')
         if password == api.admin_password {
-            permissions := req.body.to_json().get_str('permissions') or "create_microblog,relate_microblog"
+            permissions := req.body.to_json().get_str('permissions') or {
+				"create_microblog,relate_microblog"
+			}
             token := api.create_token(permissions)
-            json_response(rw, map{"token": token})
+            json_response(rw, {'token': token})
         } else {
             http.response_unauthorized(rw)
         }
     }
 }
 
-fn (api &MicroblogAPI) validate_token(token string) bool {
+fn (api MicroblogAPI) validate_token(token string) bool {
     for t in api.tokens {
         if t.id == token && !t.used {
             return true
@@ -286,7 +318,7 @@ fn (api &MicroblogAPI) validate_token(token string) bool {
     return false
 }
 
-fn (mut api &MicroblogAPI) create_token(permissions string) string {
+fn (mut api MicroblogAPI) create_token(permissions string) string {
     id := uuid()
     token := Token{
         id: id,
