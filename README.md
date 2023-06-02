@@ -48,7 +48,7 @@ Remember to securely manage and protect the admin password to maintain the secur
 2. Change into the project directory:
 
    ```bash
-   cd microblog-api
+   cd mb
    ```
 
 3. Compile the Vlang source code to create an executable:
