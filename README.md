@@ -85,7 +85,7 @@ Remember to securely manage and protect the admin password to maintain the secur
 1. Start the Microblog API server by running the compiled executable:
 
    ```bash
-   ./microblog-api
+   ./mb
    ```
 
 2. The server will start and listen for incoming requests on `http://localhost:8080`.
