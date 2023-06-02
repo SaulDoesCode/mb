@@ -21,7 +21,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-//
 
 import sqlite
 import http
@@ -36,6 +35,48 @@ struct Relation {
     name string
     from_id string
     to_id string
+}
+
+struct Microblog {
+    id string
+    text string
+}
+
+struct Token {
+    id string
+    used bool
+    permissions []string
+}
+
+struct MicroblogAPI {
+    rhyzome Rhyzome
+    tokens []Token
+    admin_password string
+}
+
+fn main() {
+    mut api := MicroblogAPI{
+        rhyzome: Rhyzome{},
+        tokens: [],
+        admin_password: "your_admin_password_here",
+    }
+    api.rhyzome.open(":memory:") or { panic(err) }
+    defer api.rhyzome.close()
+
+    // Initialize HTTP server
+    server := http.server{
+        addr: ":8080"
+    }
+
+    // API endpoints
+    server.handle('/microblogs', api.handle_microblogs)
+    server.handle('/microblogs/:id', api.handle_microblog)
+    server.handle('/microblogs/:id/relations', api.handle_relations)
+    server.handle('/microblogs/:id/relations/:relation_name', api.handle_relation)
+    server.handle('/tokens', api.handle_tokens)
+
+    // Start the server
+    server.start()
 }
 
 impl Rhyzome {
@@ -153,55 +194,13 @@ impl Rhyzome {
     }
 }
 
-struct Microblog {
-    id string
-    text string
-}
-
-struct Token {
-    id string
-    used bool
-    permissions []string
-}
-
-struct MicroblogAPI {
-    rhyzome Rhyzome
-    tokens []Token
-    admin_password string
-}
-
-fn main() {
-    mut api := MicroblogAPI{
-        rhyzome: Rhyzome{},
-        tokens: [],
-        admin_password: "your_admin_password_here",
-    }
-    api.rhyzome.open(":memory:") or { panic(err) }
-    defer api.rhyzome.close()
-
-    // Initialize HTTP server
-    server := http.server{
-        addr: ":8080"
-    }
-
-    // API endpoints
-    server.handle('/microblogs', api.handle_microblogs)
-    server.handle('/microblogs/:id', api.handle_microblog)
-    server.handle('/microblogs/:id/relations', api.handle_relations)
-    server.handle('/microblogs/:id/relations/:relation_name', api.handle_relation)
-    server.handle('/tokens', api.handle_tokens)
-
-    // Start the server
-    server.start()
-}
-
 fn (mut api &MicroblogAPI) handle_microblogs(rw http.ResponseWriter, req http.Request) {
     if req.method == .GET {
         microblogs := api.rhyzome.query_relation("microblog")
         json_response(rw, microblogs)
     } else if req.method == .POST {
         token := req.header.get('Authorization')
-        if !api.validate_token(token, "create_microblog") {
+        if !api.validate_token(token) {
             http.response_unauthorized(rw)
             return
         }
@@ -221,7 +220,7 @@ fn (mut api &MicroblogAPI) handle_microblog(rw http.ResponseWriter, req http.Req
         json_response(rw, map{"id": tweet_id, "text": microblog})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
-        if !api.validate_token(token, "delete_microblog") {
+        if !api.validate_token(token) {
             http.response_unauthorized(rw)
             return
         }
@@ -245,7 +244,7 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
 
     if req.method == .POST {
         token := req.header.get('Authorization')
-        if !api.validate_token(token, "create_relation") {
+        if !api.validate_token(token) {
             http.response_unauthorized(rw)
             return
         }
@@ -255,72 +254,57 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
         json_response(rw, map{"message": "Related microblog added"})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
-        if !api.validate_token(token, "delete_relation") {
+        if !api.validate_token(token) {
             http.response_unauthorized(rw)
             return
         }
 
         api.rhyzome.delete_relation(relation_name)
-        json_response(rw, map{"message": "Related microblogs deleted"})
+        json_response(rw, map{"message": "Related microblog deleted"})
     }
 }
 
 fn (mut api &MicroblogAPI) handle_tokens(rw http.ResponseWriter, req http.Request) {
     if req.method == .POST {
         password := req.body.to_json().get_str('password')
-        if password != api.admin_password {
+        if password == api.admin_password {
+            permissions := req.body.to_json().get_str('permissions') or "create_microblog,relate_microblog"
+            token := api.create_token(permissions)
+            json_response(rw, map{"token": token})
+        } else {
             http.response_unauthorized(rw)
-            return
         }
-
-        permissions := req.query.get_list('permissions')
-
-        // Check if permissions are provided
-        if len(permissions) == 0 {
-            // Assign default permissions
-            permissions = ['create_microblog', 'relate_microblog']
-        }
-
-        // Generate token with provided or default permissions
-        token := Token{
-            id: generate_token(),
-            used: false,
-            permissions: permissions,
-        }
-        api.tokens << token
-        json_response(rw, map{"token": token.id})
     }
 }
 
-fn (api MicroblogAPI) validate_token(token string, required_permission string) bool {
-    for i, t := range api.tokens {
-        if t.id == token && !t.used && has_permission(t.permissions, required_permission) {
-            api.tokens[i].used = true
+fn (api &MicroblogAPI) validate_token(token string) bool {
+    for t in api.tokens {
+        if t.id == token && !t.used {
             return true
         }
     }
     return false
 }
 
-fn has_permission(permissions []string, required_permission string) bool {
-    for _, p := range permissions {
-        if p == required_permission {
-            return true
-        }
+fn (mut api &MicroblogAPI) create_token(permissions string) string {
+    id := uuid()
+    token := Token{
+        id: id,
+        used: false,
+        permissions: permissions.split(','),
     }
-    return false
+    api.tokens << token
+    return id
 }
 
-fn json_response(rw http.ResponseWriter, data any) {
-    rw.headers['Content-Type'] = 'application/json'
-    rw.write(data.to_json())
+fn json_response(rw http.ResponseWriter, data interface{}) {
+    json_str := encoding.base64.encode(data.to_json().to_string())
+    rw.header.set('Content-Type', 'application/json')
+    rw.write(json_str)
 }
 
 fn uuid() string {
-    return std.uuid.new_v4().to_string()
-}
-
-fn generate_token() string {
-    bytes := crypto.random.bytes(16)
-    return encoding.base64.encode(bytes, encoding.base64.url_safe)
+    mut buf := [16]byte{}
+    crypto.random.fill(buf)
+    return encoding.base64.encode(buf)
 }
