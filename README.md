@@ -203,47 +203,13 @@ To modify the Vlang script and change the admin password for the token generatio
 
 1. Open the Vlang script file in a text editor of your choice.
 
-2. Locate the `handle_tokens` method within the `MicroblogAPI` struct. This method handles the token generation route.
+2. Locate the line `` admin_password: "your_admin_password_here" `` should currently be line 178
 
-3. In the `handle_tokens` method, find the code block that generates the token. It should look like this:
+3. Change the password.
 
-   ```v
-   if req.method == .POST {
-       // Token generation code
-       token := Token{
-           id: generate_token(),
-           used: false,
-       }
-       api.tokens << token
-       json_response(rw, map{"token": token.id})
-   }
-   ```
+4. Save the modified Vlang script file
 
-4. Add a condition to check the admin password before generating the token. You can modify the code block as follows:
-
-   ```v
-   if req.method == .POST {
-       admin_password := "your_admin_password" // Replace "your_admin_password" with the desired password
-
-       // Check if the provided password matches the admin password
-       if req.body.to_string() != admin_password {
-           http.response_unauthorized(rw)
-           return
-       }
-
-       // Token generation code
-       token := Token{
-           id: generate_token(),
-           used: false,
-       }
-       api.tokens << token
-       json_response(rw, map{"token": token.id})
-   }
-   ```
-
-   In this code, replace `"your_admin_password"` with the actual admin password you want to use. Make sure to keep the password secure and avoid hardcoding it in the script.
-
-5. Save the modified Vlang script file.
+5. run and enjoy, you can change it again ``vlang -prod mb.v``
 
 ## Conclusion
 The Microblog API provides a straightforward and efficient way to manage microblogging data. By leveraging the Rhyzome database and a token-based authentication system, it ensures secure and reliable access to microblogs.
