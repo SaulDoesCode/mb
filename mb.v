@@ -23,12 +23,11 @@
 // SOFTWARE.
 //
 
-
 import sqlite
 import http
 import crypto.random
 import encoding.base64
-  
+
 struct Rhyzome {
     conn sqlite.Connection
 }
@@ -202,7 +201,7 @@ fn (mut api &MicroblogAPI) handle_microblogs(rw http.ResponseWriter, req http.Re
         json_response(rw, microblogs)
     } else if req.method == .POST {
         token := req.header.get('Authorization')
-        if !api.validate_token(token) {
+        if !api.validate_token(token, "create_microblog") {
             http.response_unauthorized(rw)
             return
         }
@@ -222,7 +221,7 @@ fn (mut api &MicroblogAPI) handle_microblog(rw http.ResponseWriter, req http.Req
         json_response(rw, map{"id": tweet_id, "text": microblog})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
-        if !api.validate_token(token) {
+        if !api.validate_token(token, "delete_microblog") {
             http.response_unauthorized(rw)
             return
         }
@@ -246,7 +245,7 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
 
     if req.method == .POST {
         token := req.header.get('Authorization')
-        if !api.validate_token(token) {
+        if !api.validate_token(token, "create_relation") {
             http.response_unauthorized(rw)
             return
         }
@@ -256,7 +255,7 @@ fn (mut api &MicroblogAPI) handle_relation(rw http.ResponseWriter, req http.Requ
         json_response(rw, map{"message": "Related microblog added"})
     } else if req.method == .DELETE {
         token := req.header.get('Authorization')
-        if !api.validate_token(token) {
+        if !api.validate_token(token, "delete_relation") {
             http.response_unauthorized(rw)
             return
         }
@@ -274,19 +273,30 @@ fn (mut api &MicroblogAPI) handle_tokens(rw http.ResponseWriter, req http.Reques
             return
         }
 
+        permissions := req.query.get_list('permissions')
         token := Token{
             id: generate_token(),
             used: false,
+            permissions: permissions,
         }
         api.tokens << token
         json_response(rw, map{"token": token.id})
     }
 }
 
-fn (api MicroblogAPI) validate_token(token string) bool {
+fn (api MicroblogAPI) validate_token(token string, required_permission string) bool {
     for i, t := range api.tokens {
-        if t.id == token && !t.used {
+        if t.id == token && !t.used && has_permission(t.permissions, required_permission) {
             api.tokens[i].used = true
+            return true
+        }
+    }
+    return false
+}
+
+fn has_permission(permissions []string, required_permission string) bool {
+    for _, p := range permissions {
+        if p == required_permission {
             return true
         }
     }
