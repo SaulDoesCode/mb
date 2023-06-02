@@ -42,7 +42,7 @@ Remember to securely manage and protect the admin password to maintain the secur
 1. Clone the repository to your local machine:
 
    ```bash
-   git clone https://github.com/your-repo/microblog-api.git
+   git clone https://github.com/SaulDoesCode/mb.git
    ```
 
 2. Change into the project directory:
