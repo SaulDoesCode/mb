@@ -274,6 +274,14 @@ fn (mut api &MicroblogAPI) handle_tokens(rw http.ResponseWriter, req http.Reques
         }
 
         permissions := req.query.get_list('permissions')
+
+        // Check if permissions are provided
+        if len(permissions) == 0 {
+            // Assign default permissions
+            permissions = ['create_microblog', 'relate_microblog']
+        }
+
+        // Generate token with provided or default permissions
         token := Token{
             id: generate_token(),
             used: false,
